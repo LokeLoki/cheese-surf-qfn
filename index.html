@@ -313,7 +313,7 @@ function spray(x, y, col = '#e6faff') {
 function updateFx(dt) {
   for (const p of particles) { p.vy += 12 * dt; p.x += p.vx; p.y += p.vy; p.life -= 1; }
   particles = particles.filter(p => p.life > 0);
-  for (const f of floaters) { f.y -= .7; f.life -= 1; }
+  for (const f of floaters) { f.y -= .7; if (f.y < 96) f.y += 1.4; f.life -= 1; } // ceiling at the title band
   floaters = floaters.filter(f => f.life > 0);
   foamTrail.push({ x: CHEESE_X - 95, y: waveY(CHEESE_X - 95, t) + 4, life: 40, max: 40 });
   for (const f of foamTrail) f.life -= 1;
@@ -920,7 +920,8 @@ function drawBubbles() {
   for (const b of bubbles) {
     const age = t - b.t0, pop = Math.min(1, age * 7), fade = age > b.life - .5 ? (b.life - age) * 2 : 1;
     const lift = currentAir === null ? 0 : Math.sin(Math.PI * currentAir) * jumpH;
-    const bx = CHEESE_X + 40, by = waveY(CHEESE_X, t) - 122 - lift - 120 - age * 14;
+    let bx = Math.min(CHEESE_X + 40, W - 150), by = waveY(CHEESE_X, t) - 122 - lift - 120 - age * 14;
+    by = Math.max(by, 86 + Math.min(1, age * 3) * 26); // never enter the title band; hover just below it if crowded
     ctx.save(); ctx.globalAlpha = Math.max(0, fade); ctx.translate(bx, by); ctx.scale(pop, pop);
     ctx.font = '700 15px "Segoe UI", sans-serif';
     const w = Math.max(60, ctx.measureText(b.text).width + 26);
