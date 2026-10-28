@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADICAL FROMAGE 🧀 — a dairy legend rides the eternal wave</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#0a0618; overflow:hidden; font-family:'Segoe UI',Arial,sans-serif; }
+  #wrap { position:relative; width:min(96vw, 960px); margin:0 auto; top:50%; transform:translateY(-50%); }
+  canvas { width:100%; display:block; border-radius:14px; box-shadow:0 0 60px rgba(255,45,149,.35), 0 0 120px rgba(20,184,166,.15); cursor:pointer; }
+  #title {
+    position:absolute; top:16px; left:0; right:0; text-align:center; pointer-events:none;
+    font-family:'Arial Black','Segoe UI',sans-serif; font-weight:900; font-size:clamp(20px,4vw,38px);
+    letter-spacing:.14em; color:#fff;
+    text-shadow:0 0 8px #ff2d95, 0 0 24px #ff2d95, 0 0 48px #ff2d95, 3px 3px 0 #14b8a6;
+  }
+  #sub {
+    position:absolute; top:clamp(42px,6.5vw,60px); left:0; right:0; text-align:center; pointer-events:none;
+    color:#8ef4e6; letter-spacing:.3em; font-size:clamp(9px,1.4vw,13px); text-transform:uppercase;
+    text-shadow:0 0 10px #14b8a6;
+  }
+  #mute {
+    position:absolute; top:14px; right:14px; background:rgba(10,6,24,.55); color:#fff;
+    border:1px solid rgba(255,45,149,.6); border-radius:10px; padding:8px 14px; font-size:18px;
+    cursor:pointer; backdrop-filter:blur(4px);
+  }
+  #mute:hover { background:rgba(255,45,149,.25); }
+  #hint {
+    position:absolute; bottom:12px; right:16px; color:rgba(255,255,255,.45); font-size:11px;
+    letter-spacing:.08em; pointer-events:none;
+  }
+  #start {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(6,3,16,.72); backdrop-filter:blur(3px); border-radius:14px; cursor:pointer;
+  }
+  #start .card { text-align:center; color:#fff; }
+  #start .big { font-size:64px; filter:drop-shadow(0 0 18px #ffd54a); animation:bob 1.6s ease-in-out infinite; display:inline-block; }
+  #start .btn {
+    margin-top:18px; display:inline-block; padding:14px 34px; border-radius:999px;
+    background:linear-gradient(90deg,#ff2d95,#ffb347); color:#0a0618; font-weight:900;
+    font-size:18px; letter-spacing:.12em; box-shadow:0 0 30px rgba(255,45,149,.6);
+  }
+  #start .note { margin-top:14px; color:#8ef4e6; font-size:12px; letter-spacing:.2em; }
+  @keyframes bob { 0%,100%{transform:translateY(0) rotate(-8deg)} 50%{transform:translateY(-12px) rotate(8deg)} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="600"></canvas>
+  <div id="title">RADICAL FROMAGE</div>
+  <div id="sub">a dairy legend never falls</div>
+  <button id="mute" title="toggle sound">🔊</button>
+  <div id="hint">procedural synthwave + ocean · pure canvas</div>
+  <div id="start"><div class="card">
+    <span class="big">🧀</span>
+    <div class="btn">TAP TO SURF</div>
+    <div class="note">audio required — he rides in silence otherwise</div>
+  </div></div>
+</div>
+<script>
+// ============================================================
+// RADICAL FROMAGE — cheese surfing infinite loop
+// CONFIG → STATE → AUDIO → TICK → DRAW
+// ============================================================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ---------------- CONFIG ----------------
+const WAVE_SPEED = 130;          // px/s water scroll
+const CHEESE_X = W * 0.36;
+const BPM = 104;
+const STEP = (60 / BPM) / 4;     // 16th note
+const TRICK_EVERY = 7;           // seconds between airs
+const TRICK_AT = 6;              // first trick
+const AIR_DUR = 1.15;
+
+// ---------------- STATE ----------------
+let t = 0, last = performance.now();
+let nextJumpAt = TRICK_AT, jumpStart = -99, jumped = false, landedFired = true;
+let particles = [], foamTrail = [], floaters = [];
+const HYPE = ['SICK!', 'DAIRY GOOO!', 'UNSUPPORTED CHEESE!', 'GOUDA VIBES!', 'HOLY GRUYÈRE!', 'PASTEURIZED?! NEVER.', 'FONDUE FLOW!', 'MILK RUN WRECKED'];
+
+function waveY(x, time) {
+  return H * 0.60
+    + 30 * Math.sin((x + time * WAVE_SPEED) * 0.0105)
+    + 16 * Math.sin((x * 0.53 - time * WAVE_SPEED * 1.27) * 0.019)
+    + 7  * Math.sin((x * 2.1 + time * 47) * 0.038);
+}
+function waveSlope(x, time) { return (waveY(x + 14, time) - waveY(x - 14, time)) / 28; }
+
+function trickState() {
+  if (t >= nextJumpAt) { if (!jumped) { jumpStart = t; jumped = true; landedFired = false; sfxWhoosh(); } }
+  if (jumpStart < 0) return null;
+  const p = (t - jumpStart) / AIR_DUR;
+  if (p >= 1) {
+    if (!landedFired) {
+      landedFired = true; nextJumpAt = t + TRICK_EVERY;
+      splash(CHEESE_X, waveY(CHEESE_X, t));
+      sfxSplash(); sfxAirhorn();
+      floaters.push({ x: CHEESE_X, y: waveY(CHEESE_X, t) - 190, text: HYPE[(Math.random() * HYPE.length) | 0], life: 90, max: 90, rot: (Math.random() - .5) * .2 });
+    }
+    return null;
+  }
+  return p;
+}
+
+// ---------------- AUDIO (procedural, no files) ----------------
+let AC = null, master = null, musicG = null, sfxG = null, waterG = null, muted = false;
+let stepIdx = 0, nextStepTime = 0, schedTimer = null, noiseBuf = null;
+const mf = m => 440 * Math.pow(2, (m - 69) / 12);
+const PROG = [ {root:45, ch:[57,60,64]}, {root:41, ch:[53,57,60]}, {root:48, ch:[60,64,67]}, {root:43, ch:[55,59,62]} ]; // Am F C G
+
+function initAudio() {
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = .9;
+  const comp = AC.createDynamicsCompressor();
+  master.connect(comp).connect(AC.destination);
+  musicG = AC.createGain(); musicG.gain.value = .8; musicG.connect(master);
+  sfxG = AC.createGain(); sfxG.gain.value = .9; sfxG.connect(master);
+  // delay for arps
+  const dly = AC.createDelay(1); dly.delayTime.value = STEP * 2;
+  const fb = AC.createGain(); fb.gain.value = .32;
+  dly.connect(fb).connect(dly); dly.connect(musicG);
+  window._arpDelay = dly;
+  // noise buffer
+  noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  let lastV = 0;
+  for (let i = 0; i < d.length; i++) { const wn = Math.random() * 2 - 1; lastV = (lastV + .02 * wn) / 1.02; d[i] = lastV * 3.5; }
+  // ocean ambience
+  const src = AC.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+  waterG = AC.createGain(); waterG.gain.value = .1;
+  const swell = AC.createOscillator(), swellG = AC.createGain();
+  swell.frequency.value = .11; swellG.gain.value = .05;
+  swell.connect(swellG).connect(waterG.gain);
+  const fl = AC.createOscillator(), flG = AC.createGain();
+  fl.frequency.value = .07; flG.gain.value = 180;
+  fl.connect(flG).connect(lp.frequency);
+  src.connect(lp).connect(waterG).connect(master);
+  src.start(); swell.start(); fl.start();
+  // music scheduler
+  stepIdx = 0; nextStepTime = AC.currentTime + .08;
+  schedTimer = setInterval(schedule, 30);
+}
+function schedule() {
+  while (nextStepTime < AC.currentTime + .15) {
+    playStep(stepIdx % 64, nextStepTime);
+    nextStepTime += STEP; stepIdx++;
+  }
+}
+function env(g, t0, vol, dur) { g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); }
+function tone(type, freq, t0, dur, vol, dest) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  env(g, t0, vol, dur);
+  o.connect(g).connect(dest || musicG); o.start(t0); o.stop(t0 + dur + .05);
+  return o;
+}
+function noiseHit(t0, dur, vol, type, f0, f1) {
+  const s = AC.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
+  const f = AC.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(f0, t0);
+  if (f1) f.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+  const g = AC.createGain(); env(g, t0, vol, dur);
+  s.connect(f).connect(g).connect(sfxG); s.start(t0, Math.random()); s.stop(t0 + dur + .05);
+}
+function playStep(s, t0) {
+  const bar = (s / 16) | 0, inBar = s % 16, P = PROG[bar];
+  if (inBar === 0) { // pad
+    P.ch.forEach(m => { tone('sawtooth', mf(m), t0, STEP * 15, .028); tone('sawtooth', mf(m) * 1.004, t0, STEP * 15, .024); });
+  }
+  if (inBar % 2 === 0) { // bass
+    const oct = (inBar === 10 || inBar === 6) ? 2 : 1;
+    const o = tone('sawtooth', mf(P.root) * oct, t0, STEP * 1.7, .16);
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+    o.disconnect(); o.connect(lp); lp.connect(musicG);
+  }
+  // arp
+  const arp = [0, 1, 2, 1];
+  tone('triangle', mf(P.ch[arp[inBar % 4]]) * 2, t0, STEP * .9, .06, window._arpDelay);
+  if (inBar % 2 === 1) tone('triangle', mf(P.ch[(inBar >> 1) % 3]) * 4, t0 + STEP * .5, STEP * .5, .025);
+  // drums
+  if (inBar === 0 || inBar === 8 || inBar === 11) { // kick
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.frequency.setValueAtTime(130, t0); o.frequency.exponentialRampToValueAtTime(42, t0 + .13);
+    env(g, t0, .5, .16); o.connect(g).connect(musicG); o.start(t0); o.stop(t0 + .2);
+  }
+  if (inBar === 4 || inBar === 12) noiseHit(t0, .13, .18, 'bandpass', 1900, 900); // snare
+  if (inBar % 2 === 1) noiseHit(t0, .04, .05, 'highpass', 7000);                  // hat
+}
+function sfxWhoosh() { if (!AC) return; noiseHit(AC.currentTime, .55, .3, 'bandpass', 320, 2200); }
+function sfxSplash() { if (!AC) return; noiseHit(AC.currentTime, .4, .5, 'lowpass', 1500, 300); }
+function sfxAirhorn() {
+  if (!AC) return; const t0 = AC.currentTime;
+  [57, 60, 64].forEach((m, i) => {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(mf(m) * .985, t0);
+    o.frequency.linearRampToValueAtTime(mf(m), t0 + .18);
+    env(g, t0, .075, .5);
+    o.connect(g).connect(sfxG); o.start(t0 + i * .015); o.stop(t0 + .6);
+  });
+}
+
+// ---------------- FX ----------------
+function splash(x, y) {
+  for (let i = 0; i < 26; i++) {
+    const a = -Math.PI / 2 + (Math.random() - .5) * 1.9, sp = 2 + Math.random() * 5;
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 30 + Math.random() * 25, max: 55, size: 2 + Math.random() * 4, col: '#bfefff' });
+  }
+}
+function spray(x, y) {
+  for (let i = 0; i < 2; i++)
+    particles.push({ x, y, vx: -2 - Math.random() * 3, vy: -1.5 - Math.random() * 3, life: 18 + Math.random() * 14, max: 32, size: 1.5 + Math.random() * 2.5, col: '#e6faff' });
+}
+function updateFx(dt) {
+  for (const p of particles) { p.vy += 12 * dt; p.x += p.vx; p.y += p.vy; p.life -= 1; }
+  particles = particles.filter(p => p.life > 0);
+  for (const f of floaters) { f.y -= .7; f.life -= 1; }
+  floaters = floaters.filter(f => f.life > 0);
+  foamTrail.push({ x: CHEESE_X - 95, y: waveY(CHEESE_X - 95, t) + 4, life: 40, max: 40 });
+  for (const f of foamTrail) f.life -= 1;
+  foamTrail = foamTrail.filter(f => f.life > 0);
+}
+
+// ---------------- DRAW ----------------
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#241243'); g.addColorStop(.45, '#7b2d64'); g.addColorStop(.6, '#ff6a3d'); g.addColorStop(1, '#ffb347');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // synthwave sun
+  const sx = W * .72, sy = H * .30, r = 78;
+  const sg = ctx.createRadialGradient(sx, sy, 10, sx, sy, r);
+  sg.addColorStop(0, '#fff3b0'); sg.addColorStop(.5, '#ffb347'); sg.addColorStop(1, '#ff2d95');
+  ctx.save(); ctx.beginPath(); ctx.arc(sx, sy, r, 0, 7); ctx.clip();
+  ctx.fillStyle = sg; ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+  ctx.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 7; i++) ctx.fillRect(sx - r, sy + 6 + i * 11, r * 2, 3 + i * 1.2);
+  ctx.restore();
+  ctx.shadowColor = '#ff2d95'; ctx.shadowBlur = 60;
+  ctx.strokeStyle = 'rgba(255,45,149,.35)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(sx, sy, r + 2, 0, 7); ctx.stroke(); ctx.shadowBlur = 0;
+  // clouds
+  ctx.fillStyle = 'rgba(255,170,200,.28)';
+  for (const [cx, cy, cw] of [[(t * 12) % (W + 300) - 150, 90, 160], [(t * 7 + 400) % (W + 300) - 150, 150, 110], [(t * 18 + 800) % (W + 300) - 150, 60, 90]]) {
+    ctx.beginPath(); ctx.ellipse(cx, cy, cw, 14, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + cw * .4, cy - 8, cw * .5, 10, 0, 0, 7); ctx.fill();
+  }
+}
+function drawWaveLayer(time, amp, base, speed, fill, foam) {
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 12) {
+    const y = base + amp * Math.sin((x + time * speed) * .011) + (amp * .5) * Math.sin((x * .6 - time * speed * 1.4) * .02);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  if (foam) {
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 12) {
+      const y = base + amp * Math.sin((x + time * speed) * .011) + (amp * .5) * Math.sin((x * .6 - time * speed * 1.4) * .02);
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = foam; ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+function drawWaterFront(time) {
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 10) ctx.lineTo(x, waveY(x, time));
+  ctx.lineTo(W, H); ctx.closePath();
+  const g = ctx.createLinearGradient(0, H * .55, 0, H);
+  g.addColorStop(0, 'rgba(16,140,150,.88)'); g.addColorStop(.4, 'rgba(8,74,110,.92)'); g.addColorStop(1, 'rgba(4,26,60,.96)');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += 10) { const y = waveY(x, time); x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+  ctx.strokeStyle = 'rgba(220,255,255,.8)'; ctx.lineWidth = 2.5; ctx.stroke();
+  // sun reflection
+  ctx.fillStyle = 'rgba(255,90,110,.18)';
+  for (let i = 0; i < 8; i++) {
+    const w = 90 - i * 8;
+    ctx.fillRect(W * .72 - w / 2 + Math.sin(time * 2 + i) * 12, H * .62 + i * 26, w, 5);
+  }
+}
+function drawBoard() {
+  ctx.fillStyle = '#f5f0e6'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-80, 96);
+  ctx.quadraticCurveTo(-95, 100, -82, 106);
+  ctx.lineTo(78, 106);
+  ctx.quadraticCurveTo(98, 100, 82, 96);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = '#14b8a6'; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(-78, 101); ctx.lineTo(80, 101); ctx.stroke();
+  ctx.fillStyle = '#ff2d95';
+  ctx.beginPath(); ctx.moveTo(82, 96); ctx.quadraticCurveTo(98, 100, 82, 106); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#0e7490';
+  ctx.beginPath(); ctx.moveTo(-60, 106); ctx.lineTo(-52, 122); ctx.lineTo(-44, 106); ctx.closePath(); ctx.fill();
+}
+function drawCheese(air) {
+  // legs
+  ctx.strokeStyle = '#c98f0e'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-22, 30); ctx.lineTo(-26, 92); ctx.moveTo(22, 30); ctx.lineTo(30, 92); ctx.stroke();
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(-36, 92); ctx.lineTo(-16, 92); ctx.moveTo(22, 92); ctx.lineTo(42, 92); ctx.stroke();
+  // wedge body
+  const bg = ctx.createLinearGradient(0, -70, 0, 40);
+  bg.addColorStop(0, '#ffe066'); bg.addColorStop(1, '#f4b41a');
+  ctx.fillStyle = bg; ctx.strokeStyle = '#c98f0e'; ctx.lineWidth = 3.5;
+  ctx.beginPath(); ctx.moveTo(-58, 35); ctx.lineTo(58, 35); ctx.lineTo(2, -68); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // holes
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(-58, 35); ctx.lineTo(58, 35); ctx.lineTo(2, -68); ctx.closePath(); ctx.clip();
+  ctx.fillStyle = '#d99a12';
+  for (const [hx, hy, hr] of [[-28, 8, 10], [22, 20, 8], [-6, -18, 7], [38, 2, 6], [-42, 26, 7], [12, -44, 6]]) {
+    ctx.beginPath(); ctx.arc(hx, hy, hr, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(120,80,0,.25)'; ctx.beginPath(); ctx.arc(hx + 2, hy + 2, hr - 2, 0, 7); ctx.fill();
+    ctx.fillStyle = '#d99a12';
+  }
+  ctx.restore();
+  // arms
+  const swing = air !== null ? 1 : Math.sin(t * 2.2) * .25;
+  ctx.strokeStyle = '#f4b41a'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+  // shaka right arm up
+  const ra = -0.9 - swing;
+  ctx.beginPath(); ctx.moveTo(42, -12); ctx.lineTo(42 + Math.cos(ra) * 34, -12 + Math.sin(ra) * 34); ctx.stroke();
+  const hx = 42 + Math.cos(ra) * 34, hy = -12 + Math.sin(ra) * 34;
+  ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(hx, hy, 7, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(hx + 4, hy - 4); ctx.lineTo(hx + 11, hy - 10); ctx.moveTo(hx - 4, hy - 5); ctx.lineTo(hx - 2, hy - 13); ctx.stroke();
+  // left arm out
+  const la = 2.5 + swing * .4;
+  ctx.strokeStyle = '#f4b41a'; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(-44, 0); ctx.lineTo(-44 + Math.cos(la) * 30, Math.sin(la) * 30); ctx.stroke();
+  ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(-44 + Math.cos(la) * 30, Math.sin(la) * 30, 7, 0, 7); ctx.fill();
+  // sunglasses
+  ctx.fillStyle = '#111'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  rrect(-26, -20, 24, 15, 6); rrect(4, -22, 24, 15, 6);
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-2, -13); ctx.lineTo(4, -14); ctx.moveTo(-26, -14); ctx.lineTo(-36, -18); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-20, -17); ctx.lineTo(-12, -9); ctx.moveTo(10, -19); ctx.lineTo(18, -11); ctx.stroke();
+  // smirk (open stoked mouth mid-air)
+  if (air === null) { ctx.strokeStyle = '#7a4b00'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(20, 6, 9, .15, Math.PI - .5); ctx.stroke(); }
+  else { ctx.fillStyle = '#7a2b00'; ctx.beginPath(); ctx.ellipse(20, 10, 10, 8, 0, 0, 7); ctx.fill();
+         ctx.fillStyle = '#fff'; ctx.fillRect(11, 4, 18, 4); }
+  // gold chain + cheese-wheel pendant
+  ctx.fillStyle = '#ffd700'; ctx.strokeStyle = '#a87400'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 6; i++) {
+    const a = .35 + i / 6 * 2.4, cx = 4 + Math.cos(a) * 26, cy = 4 + Math.sin(a) * 14 + 8;
+    ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 7); ctx.fill(); ctx.stroke();
+  }
+  ctx.fillStyle = '#ffd700'; ctx.beginPath(); ctx.arc(4, 26, 8, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#a87400';
+  ctx.beginPath(); ctx.arc(1, 24, 1.8, 0, 7); ctx.arc(7, 28, 1.5, 0, 7); ctx.fill();
+  // backwards snapback at the apex
+  ctx.fillStyle = '#ff2d95';
+  ctx.beginPath(); ctx.arc(2, -56, 19, Math.PI, 2 * Math.PI); ctx.fill();
+  ctx.fillStyle = '#d1155f';
+  ctx.beginPath(); ctx.moveTo(16, -58); ctx.lineTo(34, -52); ctx.lineTo(30, -46); ctx.lineTo(14, -50); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#ffd54a'; ctx.beginPath(); ctx.arc(2, -74, 3.5, 0, 7); ctx.fill();
+  function rrect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+}
+function drawCheeseSurfer(air) {
+  const y0 = waveY(CHEESE_X, t);
+  const lift = air === null ? 0 : Math.sin(Math.PI * air) * 130;
+  const cy = y0 - 122 - lift;
+  const tilt = Math.atan(waveSlope(CHEESE_X, t)) * .75;
+  const spin = air === null ? 0 : air * Math.PI * 2;
+  // shadow on water
+  ctx.fillStyle = `rgba(0,0,0,${air === null ? .3 : .3 - lift * .0015})`;
+  ctx.beginPath(); ctx.ellipse(CHEESE_X, y0 + 8, 70 - lift * .25, 12, 0, 0, 7); ctx.fill();
+  // foam trail
+  for (const f of foamTrail) {
+    ctx.fillStyle = `rgba(230,255,255,${(f.life / f.max) * .4})`;
+    ctx.beginPath(); ctx.ellipse(f.x, f.y, 14 * (f.life / f.max) + 4, 4, 0, 0, 7); ctx.fill();
+  }
+  ctx.save();
+  ctx.translate(CHEESE_X, cy); ctx.rotate(tilt + spin);
+  drawBoard(); drawCheese(air);
+  ctx.restore();
+  if (air === null) spray(CHEESE_X - 88, y0 + 2);
+}
+function drawFx() {
+  for (const p of particles) {
+    ctx.fillStyle = p.col; ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  for (const f of floaters) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, f.life / f.max * 2);
+    ctx.translate(f.x, f.y); ctx.rotate(f.rot);
+    ctx.font = '900 34px "Arial Black", sans-serif'; ctx.textAlign = 'center';
+    ctx.shadowColor = '#ff2d95'; ctx.shadowBlur = 18;
+    ctx.fillStyle = '#ffe066'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 4;
+    ctx.strokeText(f.text, 0, 0); ctx.fillText(f.text, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawVignette() {
+  const g = ctx.createRadialGradient(W / 2, H / 2, H * .35, W / 2, H / 2, H * .85);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(10,6,24,.55)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+// ---------------- LOOP ----------------
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, .1); last = now; t += dt;
+  const air = trickState();
+  updateFx(dt);
+  drawSky();
+  drawWaveLayer(t, 18, H * .46, WAVE_SPEED * .35, 'rgba(10,60,95,.75)', null);
+  drawWaveLayer(t, 22, H * .53, WAVE_SPEED * .65, 'rgba(12,90,120,.85)', 'rgba(190,240,255,.35)');
+  drawCheeseSurfer(air);
+  drawWaterFront(t);
+  drawFx();
+  drawVignette();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------------- UI ----------------
+const startEl = document.getElementById('start');
+startEl.addEventListener('click', () => { if (!AC) initAudio(); if (AC.state === 'suspended') AC.resume(); startEl.style.display = 'none'; });
+document.getElementById('mute').addEventListener('click', e => {
+  if (!AC) return;
+  muted = !muted; master.gain.value = muted ? 0 : .9;
+  e.target.textContent = muted ? '🔇' : '🔊';
+});
+window.addEventListener('keydown', e => { if (e.key === 'm') document.getElementById('mute').click(); });
+</script>
+</body>
+</html>
