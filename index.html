@@ -919,12 +919,14 @@ function drawBubbles() {
   ctx.textAlign = 'center';
   for (const b of bubbles) {
     const age = t - b.t0, pop = Math.min(1, age * 7), fade = age > b.life - .5 ? (b.life - age) * 2 : 1;
-    const lift = currentAir === null ? 0 : Math.sin(Math.PI * currentAir) * jumpH;
-    let bx = Math.min(CHEESE_X + 40, W - 150), by = waveY(CHEESE_X, t) - 122 - lift - 120 - age * 14;
-    by = Math.max(by, 86 + Math.min(1, age * 3) * 26); // never enter the title band; hover just below it if crowded
-    ctx.save(); ctx.globalAlpha = Math.max(0, fade); ctx.translate(bx, by); ctx.scale(pop, pop);
     ctx.font = '700 15px "Segoe UI", sans-serif';
     const w = Math.max(60, ctx.measureText(b.text).width + 26);
+    const lift = currentAir === null ? 0 : Math.sin(Math.PI * currentAir) * jumpH;
+    const cy = waveY(CHEESE_X, t) - 122 - lift;
+    // beside him at face height, not on top of him
+    let bx = Math.min(CHEESE_X + 112 + w / 2, W - w / 2 - 14);
+    let by = Math.max(cy - 20 + Math.sin(age * 2.4) * 4, 122); // never enter the title band
+    ctx.save(); ctx.globalAlpha = Math.max(0, fade); ctx.translate(bx, by); ctx.scale(pop, pop);
     if (storm.wind > .3) { // wind streaks on the bubble
       ctx.strokeStyle = `rgba(180,210,235,${.35 * storm.wind})`; ctx.lineWidth = 1.2;
       for (let s = 0; s < 3; s++) {
@@ -936,8 +938,9 @@ function drawBubbles() {
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(-w / 2, -34, w, 34, 10); else ctx.rect(-w / 2, -34, w, 34);
     ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(2, 16); ctx.lineTo(10, 0); ctx.closePath();
-    ctx.fillStyle = 'rgba(255,255,255,.94)'; ctx.fill();
+    ctx.beginPath(); // tail points LEFT at his face
+    ctx.moveTo(-w / 2 + 2, -26); ctx.lineTo(-w / 2 - 20, -15); ctx.lineTo(-w / 2 + 2, -10);
+    ctx.closePath(); ctx.fillStyle = 'rgba(255,255,255,.94)'; ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#1f2937'; ctx.fillText(b.text, 0, -12);
     ctx.restore();
     ctx.globalAlpha = 1;
