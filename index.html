@@ -51,11 +51,11 @@
   <div id="title">RADICAL FROMAGE</div>
   <div id="sub">a dairy legend never falls</div>
   <button id="mute" title="toggle sound">🔊</button>
-  <div id="hint">procedural synthwave + ocean · pure canvas</div>
+  <div id="hint">HOLD anywhere to charge · RELEASE to send it · grab the 🧀 wheels</div>
   <div id="start"><div class="card">
     <span class="big">🧀</span>
     <div class="btn">TAP TO SURF</div>
-    <div class="note">audio required — he rides in silence otherwise</div>
+    <div class="note">tap = start · HOLD + RELEASE = huge airs · steal 5 / 10 / 15 wheels to evolve</div>
   </div></div>
 </div>
 <script>
@@ -78,9 +78,12 @@ const AIR_DUR = 1.15;
 
 // ---------------- STATE ----------------
 let t = 0, last = performance.now();
-let nextJumpAt = TRICK_AT, jumpStart = -99, jumped = false, landedFired = true;
+let nextJumpAt = TRICK_AT, jumpStart = -99, landedFired = true;
+let jumpDur = AIR_DUR, jumpSpins = 1, jumpH = 130, jumpPower = .35;
+let charging = false, chargeT0 = 0, hum = null, currentAir = null;
+let wheels = 0, combo = 0, lastScoreAt = -99, formLevel = 0;
+let collectibles = [], nextWheelAt = 3.0, shake = 0, sidekickHopAt = 2;
 let particles = [], foamTrail = [], floaters = [];
-const HYPE = ['SICK!', 'DAIRY GOOO!', 'UNSUPPORTED CHEESE!', 'GOUDA VIBES!', 'HOLY GRUYÈRE!', 'PASTEURIZED?! NEVER.', 'FONDUE FLOW!', 'MILK RUN WRECKED'];
 
 function waveY(x, time) {
   return H * 0.60
@@ -90,16 +93,32 @@ function waveY(x, time) {
 }
 function waveSlope(x, time) { return (waveY(x + 14, time) - waveY(x - 14, time)) / 28; }
 
+function chargeAmt() { return charging ? Math.min(1, (t - chargeT0) / 0.95) : 0; }
+
+function fireJump(power, spins, dur, h, manual) {
+  jumpStart = t; jumpPower = power; jumpSpins = spins; jumpDur = dur; jumpH = h;
+  landedFired = false;
+  sfxLaunch(power);
+  if (manual) { combo = (t - lastScoreAt < 5) ? combo + 1 : 1; lastScoreAt = t; }
+  if (power > .85) shake = 16;
+}
+
 function trickState() {
-  if (t >= nextJumpAt) { if (!jumped) { jumpStart = t; jumped = true; landedFired = false; sfxWhoosh(); } }
+  if (!charging && jumpStart < 0 && t >= nextJumpAt) fireJump(.35, 1, AIR_DUR, 130, false);
   if (jumpStart < 0) return null;
-  const p = (t - jumpStart) / AIR_DUR;
+  const p = (t - jumpStart) / jumpDur;
   if (p >= 1) {
     if (!landedFired) {
-      landedFired = true; nextJumpAt = t + TRICK_EVERY;
-      splash(CHEESE_X, waveY(CHEESE_X, t));
-      sfxSplash(); sfxAirhorn();
-      floaters.push({ x: CHEESE_X, y: waveY(CHEESE_X, t) - 190, text: HYPE[(Math.random() * HYPE.length) | 0], life: 90, max: 90, rot: (Math.random() - .5) * .2 });
+      landedFired = true; jumpStart = -99;
+      nextJumpAt = t + TRICK_EVERY;
+      const x = CHEESE_X, y = waveY(x, t);
+      splash(x, y, jumpPower);
+      sfxSplash(jumpPower);
+      if (combo > 1) sfxAirhorn(Math.min(3, combo));
+      const tiers = jumpPower > .8 ? ['5-STAR FROMAGE!', 'GATEAU! ABSOLUTE GATEAU!', 'ILLEGAL IN 4 COUNTRIES!']
+                  : jumpPower > .5 ? ['SEND IT!!', 'BIG WEDGE ENERGY', 'GRUYÈRE MOMENT']
+                  : ['SICK!', 'DAIRY GOOO!', 'GOUDA VIBES!', 'PASTEURIZED?! NEVER.'];
+      floaters.push({ x, y: y - 170 - jumpH * .5, text: tiers[(Math.random() * tiers.length) | 0], life: 90, max: 90, rot: (Math.random() - .5) * .2 });
     }
     return null;
   }
@@ -191,10 +210,10 @@ function playStep(s, t0) {
   if (inBar % 2 === 1) noiseHit(t0, .04, .05, 'highpass', 7000);                  // hat
 }
 function sfxWhoosh() { if (!AC) return; noiseHit(AC.currentTime, .55, .3, 'bandpass', 320, 2200); }
-function sfxSplash() { if (!AC) return; noiseHit(AC.currentTime, .4, .5, 'lowpass', 1500, 300); }
-function sfxAirhorn() {
+function sfxSplash(p = .5) { if (!AC) return; noiseHit(AC.currentTime, .4 + p * .2, .3 + .35 * p, 'lowpass', 1500, 300); }
+function sfxAirhorn(layers = 1) {
   if (!AC) return; const t0 = AC.currentTime;
-  [57, 60, 64].forEach((m, i) => {
+  [[57], [57, 60], [57, 60, 64]][Math.min(2, Math.max(0, layers - 1))].forEach((m, i) => {
     const o = AC.createOscillator(), g = AC.createGain();
     o.type = 'sawtooth'; o.frequency.setValueAtTime(mf(m) * .985, t0);
     o.frequency.linearRampToValueAtTime(mf(m), t0 + .18);
@@ -202,17 +221,51 @@ function sfxAirhorn() {
     o.connect(g).connect(sfxG); o.start(t0 + i * .015); o.stop(t0 + .6);
   });
 }
+function sfxLaunch(p) {
+  if (!AC) return; const t0 = AC.currentTime;
+  noiseHit(t0, .45 + p * .3, .25 + p * .2, 'bandpass', 320, 700 + 2200 * p);
+  if (p > .8) { // reversed-cymbal riser on full charge
+    const s = AC.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
+    const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2;
+    f.frequency.setValueAtTime(180, t0); f.frequency.exponentialRampToValueAtTime(4200, t0 + .5);
+    const g = AC.createGain();
+    g.gain.setValueAtTime(.001, t0); g.gain.exponentialRampToValueAtTime(.16, t0 + .45); g.gain.exponentialRampToValueAtTime(.001, t0 + .62);
+    s.connect(f).connect(g).connect(sfxG); s.start(t0, Math.random()); s.stop(t0 + .7);
+  }
+}
+function startHum() {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain(), lp = AC.createBiquadFilter();
+  o.type = 'sawtooth'; o.frequency.value = 110; g.gain.value = 0; lp.type = 'lowpass'; lp.frequency.value = 900;
+  o.connect(lp).connect(g).connect(sfxG); o.start(); hum = { o, g };
+}
+function updateHum(c) { if (hum) { hum.o.frequency.setTargetAtTime(110 + c * 460, AC.currentTime, .05); hum.g.gain.setTargetAtTime(.04 + c * .05, AC.currentTime, .08); } }
+function stopHum() { if (hum) { try { hum.g.gain.setTargetAtTime(0, AC.currentTime, .03); hum.o.stop(AC.currentTime + .25); } catch (e) {} hum = null; } }
+function sfxCoin() {
+  if (!AC) return; const t0 = AC.currentTime;
+  tone('square', 1319, t0, .09, .08, sfxG); tone('square', 1760, t0 + .07, .14, .08, sfxG);
+}
+function sfxFanfare() {
+  if (!AC) return; const t0 = AC.currentTime;
+  [64, 67, 71, 76].forEach((m, i) => {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'sawtooth'; o.frequency.value = mf(m);
+    env(g, t0 + i * .09, .09, .35);
+    o.connect(g).connect(sfxG); o.start(t0 + i * .09); o.stop(t0 + i * .09 + .4);
+  });
+}
 
 // ---------------- FX ----------------
-function splash(x, y) {
-  for (let i = 0; i < 26; i++) {
-    const a = -Math.PI / 2 + (Math.random() - .5) * 1.9, sp = 2 + Math.random() * 5;
+function splash(x, y, p = .5) {
+  const n = Math.round(16 + 22 * p);
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (Math.random() - .5) * 1.9, sp = (2 + Math.random() * 5) * (.7 + p * .8);
     particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 30 + Math.random() * 25, max: 55, size: 2 + Math.random() * 4, col: '#bfefff' });
   }
 }
-function spray(x, y) {
+function spray(x, y, col = '#e6faff') {
   for (let i = 0; i < 2; i++)
-    particles.push({ x, y, vx: -2 - Math.random() * 3, vy: -1.5 - Math.random() * 3, life: 18 + Math.random() * 14, max: 32, size: 1.5 + Math.random() * 2.5, col: '#e6faff' });
+    particles.push({ x, y, vx: -2 - Math.random() * 3, vy: -1.5 - Math.random() * 3, life: 18 + Math.random() * 14, max: 32, size: 1.5 + Math.random() * 2.5, col });
 }
 function updateFx(dt) {
   for (const p of particles) { p.vy += 12 * dt; p.x += p.vx; p.y += p.vy; p.life -= 1; }
@@ -368,23 +421,34 @@ function drawCheese(air) {
 }
 function drawCheeseSurfer(air) {
   const y0 = waveY(CHEESE_X, t);
-  const lift = air === null ? 0 : Math.sin(Math.PI * air) * 130;
+  const lift = air === null ? 0 : Math.sin(Math.PI * air) * jumpH;
   const cy = y0 - 122 - lift;
   const tilt = Math.atan(waveSlope(CHEESE_X, t)) * .75;
-  const spin = air === null ? 0 : air * Math.PI * 2;
+  const spin = air === null ? 0 : air * Math.PI * 2 * jumpSpins;
+  const c = chargeAmt();
   // shadow on water
-  ctx.fillStyle = `rgba(0,0,0,${air === null ? .3 : .3 - lift * .0015})`;
-  ctx.beginPath(); ctx.ellipse(CHEESE_X, y0 + 8, 70 - lift * .25, 12, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = `rgba(0,0,0,${air === null ? .3 : .3 - lift * .0012})`;
+  ctx.beginPath(); ctx.ellipse(CHEESE_X, y0 + 8, 70 - lift * .2, 12, 0, 0, 7); ctx.fill();
   // foam trail
   for (const f of foamTrail) {
-    ctx.fillStyle = `rgba(230,255,255,${(f.life / f.max) * .4})`;
+    const a = (f.life / f.max) * .4;
+    ctx.fillStyle = formLevel >= 3 ? `hsla(${(f.x * .8 + t * 140) % 360},90%,65%,${a})` : `rgba(230,255,255,${a})`;
     ctx.beginPath(); ctx.ellipse(f.x, f.y, 14 * (f.life / f.max) + 4, 4, 0, 0, 7); ctx.fill();
   }
   ctx.save();
   ctx.translate(CHEESE_X, cy); ctx.rotate(tilt + spin);
+  if (charging) ctx.scale(1 + .13 * c, 1 - .16 * c);
+  if (formLevel >= 1) drawFlames();
   drawBoard(); drawCheese(air);
   ctx.restore();
-  if (air === null) spray(CHEESE_X - 88, y0 + 2);
+  if (air === null) spray(CHEESE_X - 88, y0 + 2, formLevel >= 1 ? '#ffb347' : '#e6faff');
+}
+function drawFlames() {
+  for (let i = 0; i < 6; i++) {
+    const fx = -66 + i * 26, fl = 10 + Math.random() * 16;
+    ctx.fillStyle = i % 2 ? '#ff6a3d' : '#ffb347';
+    ctx.beginPath(); ctx.moveTo(fx - 8, 108); ctx.quadraticCurveTo(fx, 108 + fl, fx + 8, 108); ctx.closePath(); ctx.fill();
+  }
 }
 function drawFx() {
   for (const p of particles) {
@@ -398,7 +462,7 @@ function drawFx() {
     ctx.translate(f.x, f.y); ctx.rotate(f.rot);
     ctx.font = '900 34px "Arial Black", sans-serif'; ctx.textAlign = 'center';
     ctx.shadowColor = '#ff2d95'; ctx.shadowBlur = 18;
-    ctx.fillStyle = '#ffe066'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 4;
+    ctx.fillStyle = f.col || '#ffe066'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 4;
     ctx.strokeText(f.text, 0, 0); ctx.fillText(f.text, 0, 0);
     ctx.restore();
   }
@@ -410,17 +474,102 @@ function drawVignette() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 
+// ---------------- COLLECTIBLES + HUD ----------------
+function updateWheels(dt) {
+  if (t >= nextWheelAt) { collectibles.push({ x: W + 50, ph: Math.random() * 7 }); nextWheelAt = t + 3.5 + Math.random() * 3.5; }
+  for (const w of collectibles) w.x -= WAVE_SPEED * dt;
+  collectibles = collectibles.filter(w => w.x > -60);
+}
+function wheelY(w) { return waveY(w.x, t) - 34 + Math.sin(t * 3 + w.ph) * 9; }
+function collectCheck() {
+  const lift = currentAir === null ? 0 : Math.sin(Math.PI * currentAir) * jumpH;
+  const cy = waveY(CHEESE_X, t) - 122 - lift;
+  for (const w of collectibles) {
+    const wy = wheelY(w), dx = w.x - CHEESE_X, dy = wy - cy;
+    if (dx * dx + dy * dy < 95 * 95) {
+      w.dead = true; wheels++;
+      combo = (t - lastScoreAt < 5) ? combo + 1 : 1; lastScoreAt = t;
+      sfxCoin();
+      for (let i = 0; i < 14; i++) {
+        const a = Math.random() * 7, s = 2 + Math.random() * 4;
+        particles.push({ x: w.x, y: wy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 20 + Math.random() * 18, max: 38, size: 2 + Math.random() * 3, col: '#ffd54a' });
+      }
+      floaters.push({ x: w.x, y: wy - 40, text: combo > 1 ? '+' + combo + 'x' : '+1', life: 60, max: 60, rot: 0, col: '#ffd54a' });
+      const nl = wheels >= 15 ? 3 : wheels >= 10 ? 2 : wheels >= 5 ? 1 : 0;
+      if (nl > formLevel) {
+        formLevel = nl; sfxFanfare();
+        floaters.push({ x: CHEESE_X, y: H * .3, text: ['', 'FLAME DECK UNLOCKED', 'SIDEKICK INBOUND', 'FINAL FORM FROMAGE'][nl], life: 110, max: 110, rot: 0, col: '#7df9ff' });
+      }
+    }
+  }
+  collectibles = collectibles.filter(w => !w.dead);
+}
+function drawWheels() {
+  for (const w of collectibles) {
+    const y = wheelY(w);
+    ctx.save(); ctx.translate(w.x, y); ctx.rotate(Math.sin(t * 2 + w.ph) * .15);
+    ctx.shadowColor = '#ffd54a'; ctx.shadowBlur = 18;
+    ctx.fillStyle = '#ffd54a'; ctx.beginPath(); ctx.arc(0, 0, 18, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#f4b41a'; ctx.beginPath(); ctx.arc(0, 0, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = '#c98f0e';
+    for (const [hx, hy] of [[-5, -3], [6, 2], [0, 6]]) { ctx.beginPath(); ctx.arc(hx, hy, 2.6, 0, 7); ctx.fill(); }
+    ctx.restore();
+  }
+}
+function drawSidekick() {
+  if (formLevel < 2) return;
+  const sx = CHEESE_X - 165;
+  let hop = 0; const hp = t - sidekickHopAt;
+  if (hp < .8) hop = Math.sin(Math.PI * hp / .8) * 46;
+  else if (hp > 6) sidekickHopAt = t + Math.random() * 2;
+  const y = waveY(sx, t) - 40 - hop;
+  const tilt = Math.atan(waveSlope(sx, t)) * .75;
+  ctx.save(); ctx.translate(sx, y); ctx.rotate(tilt + (hop > 0 ? (hp / .8) * Math.PI * 2 : 0)); ctx.scale(.42, .42);
+  ctx.fillStyle = '#f5f0e6'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(0, 100, 78, 9, 0, 0, 7); ctx.fill(); ctx.stroke();
+  drawCheese(hop > 0 ? .5 : null);
+  ctx.restore();
+}
+function drawHUD() {
+  ctx.font = '900 22px "Arial Black", sans-serif'; ctx.textAlign = 'left';
+  ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
+  ctx.fillStyle = '#ffd54a'; ctx.fillText('\u{1F9C0} ' + wheels, 20, 46);
+  if (combo > 1) { ctx.fillStyle = '#ff2d95'; ctx.fillText('COMBO \u00d7' + combo, 20, 74); }
+  ctx.shadowBlur = 0;
+  if (charging) {
+    const c = chargeAmt();
+    ctx.strokeStyle = `hsl(${200 - 200 * c},95%,60%)`; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(CHEESE_X, waveY(CHEESE_X, t) - 140, 115, -Math.PI / 2, -Math.PI / 2 + c * Math.PI * 2); ctx.stroke();
+    if (c > .9) {
+      ctx.strokeStyle = 'rgba(255,60,60,.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(CHEESE_X, waveY(CHEESE_X, t) - 140, 128 + Math.random() * 6, 0, 7); ctx.stroke();
+    }
+  }
+}
+
 // ---------------- LOOP ----------------
 function frame(now) {
   const dt = Math.min((now - last) / 1000, .1); last = now; t += dt;
-  const air = trickState();
+  currentAir = trickState();
+  if (charging) updateHum(chargeAmt());
   updateFx(dt);
+  updateWheels(dt);
+  collectCheck();
+  if (shake > 0) shake *= .88;
+  if (combo > 1 && t - lastScoreAt > 5) combo = 1;
+  ctx.save();
+  if (shake > .5) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
   drawSky();
   drawWaveLayer(t, 18, H * .46, WAVE_SPEED * .35, 'rgba(10,60,95,.75)', null);
   drawWaveLayer(t, 22, H * .53, WAVE_SPEED * .65, 'rgba(12,90,120,.85)', 'rgba(190,240,255,.35)');
-  drawCheeseSurfer(air);
+  drawSidekick();
+  drawCheeseSurfer(currentAir);
   drawWaterFront(t);
+  drawWheels();
   drawFx();
+  drawHUD();
+  ctx.restore();
   drawVignette();
   requestAnimationFrame(frame);
 }
@@ -429,6 +578,17 @@ requestAnimationFrame(frame);
 // ---------------- UI ----------------
 const startEl = document.getElementById('start');
 startEl.addEventListener('click', () => { if (!AC) initAudio(); if (AC.state === 'suspended') AC.resume(); startEl.style.display = 'none'; });
+canvas.style.touchAction = 'none';
+canvas.addEventListener('pointerdown', () => {
+  if (!AC || currentAir !== null) return;
+  charging = true; chargeT0 = t; startHum();
+});
+window.addEventListener('pointerup', () => {
+  if (!charging) return;
+  charging = false; stopHum();
+  const c = Math.max(.22, chargeAmt());
+  fireJump(c, 1 + Math.round(c * 3), .9 + c * .7, 130 + c * 170, true);
+});
 document.getElementById('mute').addEventListener('click', e => {
   if (!AC) return;
   muted = !muted; master.gain.value = muted ? 0 : .9;
