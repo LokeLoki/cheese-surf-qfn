@@ -51,7 +51,7 @@
   <div id="title">RADICAL FROMAGE</div>
   <div id="sub">a dairy legend never falls</div>
   <button id="mute" title="toggle sound">🔊</button>
-  <div id="hint">HOLD sea = charge, RELEASE = send it · TAP the cheese = he talks · dolphins may appear</div>
+  <div id="hint">HOLD = charge, RELEASE = send · TAP him = wisdom · mind the fin · storms pass</div>
   <div id="start"><div class="card">
     <span class="big">🧀</span>
     <div class="btn">TAP TO SURF</div>
@@ -84,6 +84,9 @@ let charging = false, chargeT0 = 0, hum = null, currentAir = null;
 let wheels = 0, combo = 0, lastScoreAt = -99, formLevel = 0;
 let collectibles = [], nextWheelAt = 3.0, shake = 0, sidekickHopAt = 2;
 let dolphins = [], nextDolphinAt = 7, whale = null, nextWhaleAt = 22;
+let shark = null, nextSharkAt = 14, gulls = [], nextGullAt = 5;
+let storm = { on: false, until: 0, drops: [], wind: 0 };
+let surfedDistance = 0;
 let score = 0, best = 0, bubbles = [], clickingCheese = false;
 let stars = [], bio = [];
 let particles = [], foamTrail = [], floaters = [];
@@ -91,6 +94,7 @@ const DAY_LEN = 110;
 try { best = +(localStorage.getItem('fromage_best') || 0) || 0; } catch (e) {}
 for (let i = 0; i < 90; i++) stars.push({ x: Math.random() * W, y: Math.random() * H * .5, r: .5 + Math.random() * 1.4, ph: Math.random() * 7 });
 for (let i = 0; i < 34; i++) bio.push({ x: Math.random() * W, y: H * .66 + Math.random() * H * .32, r: 1 + Math.random() * 2.2, ph: Math.random() * 7, sp: 12 + Math.random() * 26 });
+for (let i = 0; i < 130; i++) storm.drops.push({ x: Math.random() * (W + 200) - 100, y: Math.random() * H, sp: 620 + Math.random() * 260, len: 9 + Math.random() * 13 });
 const LINES = ['wedge you later','that\u2019s un-BRIE-lievable','i\u2019m gouda, thx 4 asking','no provolone like home','cheese it \u2014 big one comin','keep it fresh, friend','just here for the whey','feta than never','this wave is the cream of the crop','halloumi acts, i don\u2019t','whey to go','sharp? that\u2019s me'];
 
 function nightAmt(p) {
@@ -123,7 +127,8 @@ function waveY(x, time) {
   return H * 0.60
     + 30 * Math.sin((x + time * WAVE_SPEED) * 0.0105)
     + 16 * Math.sin((x * 0.53 - time * WAVE_SPEED * 1.27) * 0.019)
-    + 7  * Math.sin((x * 2.1 + time * 47) * 0.038);
+    + 7  * Math.sin((x * 2.1 + time * 47) * 0.038)
+    + 6  * Math.sin(time * .21) * Math.sin(x * .004 + 1.3);
 }
 function waveSlope(x, time) { return (waveY(x + 14, time) - waveY(x - 14, time)) / 28; }
 
@@ -551,7 +556,133 @@ function drawVignette(night = 0) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 
-// ---------------- WILDLIFE ----------------
+// ---------------- WILDLIFE + WEATHER ----------------
+function sfxGull() {
+  if (!AC) return; const t0 = AC.currentTime;
+  [0, .38].forEach(dl => {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(1250, t0 + dl);
+    o.frequency.exponentialRampToValueAtTime(760, t0 + dl + .22);
+    g.gain.setValueAtTime(.05, t0 + dl); g.gain.exponentialRampToValueAtTime(.0001, t0 + dl + .26);
+    o.connect(g).connect(sfxG); o.start(t0 + dl); o.stop(t0 + dl + .3);
+  });
+}
+function sfxJaws() {
+  if (!AC) return; const t0 = AC.currentTime;
+  for (let i = 0; i < 4; i++) {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'sine'; o.frequency.value = 52 + i * 3;
+    g.gain.setValueAtTime(.14, t0 + i * .34); g.gain.exponentialRampToValueAtTime(.0001, t0 + i * .34 + .3);
+    o.connect(g).connect(sfxG); o.start(t0 + i * .34); o.stop(t0 + i * .34 + .32);
+  }
+}
+function sfxThunder() {
+  if (!AC) return;
+  noiseHit(AC.currentTime, 1.3, .5, 'lowpass', 420, 55);
+}
+function updateWeather(dt) {
+  if (!storm.on && t >= storm.until) {
+    storm.on = true; storm.until = t + 9 + Math.random() * 7;
+    storm.nextBolt = t + 1.2 + Math.random() * 2;
+    sfxGull();
+  }
+  if (storm.on) {
+    storm.wind = Math.min(1, storm.wind + dt * .8);
+    if (t >= storm.nextBolt) {
+      storm.flash = .85; shake = Math.max(shake, 9);
+      sfxThunder();
+      storm.nextBolt = t + 2.2 + Math.random() * 3.5;
+    }
+    if (storm.flash > 0) storm.flash -= dt * 3.2;
+    if (t >= storm.until) { storm.on = false; storm.until = t + 45 + Math.random() * 45; }
+  } else storm.wind = Math.max(0, storm.wind - dt * .5);
+  if (gulls.length < 5 && t >= nextGullAt) {
+    gulls.push({ x: -40 - Math.random() * 60, y: 70 + Math.random() * 130, ph: Math.random() * 7, sp: 34 + Math.random() * 26 });
+    nextGullAt = t + 2.5 + Math.random() * 3.5;
+    if (!storm.on || storm.wind < .5) sfxGull();
+  }
+  for (const gu of gulls) { gu.x += gu.sp * dt * (1 + storm.wind * .8); gu.y += Math.sin(t * 1.3 + gu.ph) * 12 * dt; }
+  gulls = gulls.filter(gu => gu.x < W + 60);
+}
+function updateHazards(dt) {
+  surfedDistance += WAVE_SPEED * dt;
+  if (!shark && t >= nextSharkAt && currentAir === null) {
+    const fromLeft = Math.random() < .5;
+    shark = { x: fromLeft ? -60 : W + 60, dir: fromLeft ? 1 : -1, y: 0, p: 0, locked: false, dive: 0 };
+    sfxJaws();
+  }
+  if (shark) {
+    shark.p += dt;
+    shark.x += shark.dir * 150 * dt;
+    shark.y = waveY(shark.x, t) - 6 + Math.sin(t * 2.2) * 3 + shark.dive * 90;
+    if (!shark.locked && Math.abs(shark.x - CHEESE_X) < 34 && currentAir === null && shark.dive === 0) {
+      shark.locked = true; shark.dive = .001;
+      fireJump(.62, 1, .95, 190, false); // the chomp IS the launch ramp
+      sfxSplash(1); splash(CHEESE_X, waveY(CHEESE_X, t), 1);
+      shake = Math.max(shake, 12);
+      floaters.push({ x: CHEESE_X, y: waveY(CHEESE_X, t) - 220, text: 'OUTTA MY OCEAN!', life: 80, max: 80, rot: (Math.random() - .5) * .2, col: '#ff5555' });
+    }
+    if (shark.dive > 0) shark.dive = Math.min(1, shark.dive + dt * 1.4);
+    if (shark.x < -120 || shark.x > W + 120 || shark.p > 9) { shark = null; nextSharkAt = t + 16 + Math.random() * 18; }
+  }
+}
+function drawGulls() {
+  for (const gu of gulls) {
+    const flap = Math.sin(t * 9 + gu.ph);
+    ctx.strokeStyle = storm.wind > .5 ? 'rgba(230,240,250,.85)' : 'rgba(60,70,90,.8)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(gu.x - 9, gu.y + flap * 5);
+    ctx.quadraticCurveTo(gu.x, gu.y - 4 - flap * 2, gu.x, gu.y);
+    ctx.quadraticCurveTo(gu.x, gu.y - 4 - flap * 2, gu.x + 9, gu.y + flap * 5);
+    ctx.stroke();
+  }
+}
+function drawShark() {
+  if (!shark || shark.dive > .85) return;
+  const x = shark.x, y = shark.y;
+  ctx.save(); ctx.translate(x, y); ctx.scale(shark.dir, 1);
+  ctx.strokeStyle = 'rgba(225,245,255,.75)'; ctx.lineWidth = 2.2;
+  ctx.beginPath(); // bow wake
+  for (let i = 0; i < 3; i++) {
+    ctx.moveTo(16 - i * 10, -2 - i * 2.5);
+    ctx.quadraticCurveTo(30 - i * 12, -7 - i * 4, 44 - i * 16, -2 - i * 2.5);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#3d4c63';
+  ctx.beginPath();
+  ctx.moveTo(26, 0);
+  ctx.quadraticCurveTo(8, -9, -14, -5);
+  ctx.quadraticCurveTo(-26, -3, -38, -10);
+  ctx.quadraticCurveTo(-30, 0, -38, 9);
+  ctx.quadraticCurveTo(-24, 5, -12, 6);
+  ctx.quadraticCurveTo(8, 10, 26, 0);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, -7); ctx.quadraticCurveTo(-2, -20, -8, -12); ctx.quadraticCurveTo(-4, -10, 0, -7); ctx.fill();
+  ctx.fillStyle = 'rgba(220,235,255,.9)';
+  ctx.beginPath(); ctx.moveTo(24, -1); ctx.lineTo(31, 1); ctx.lineTo(23, 4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawRain() {
+  if (storm.wind <= .02) return;
+  ctx.strokeStyle = `rgba(200,225,255,${.28 * storm.wind})`;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  const slant = 2 + storm.wind * 5;
+  for (const d of storm.drops) {
+    d.y += d.sp * (1/60); d.x -= slant * d.sp * (1/60) * .4;
+    if (d.y > H) { d.y = -20; d.x = Math.random() * (W + 200) - 60; }
+    ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - slant, d.y + d.len);
+  }
+  ctx.stroke();
+  if (storm.flash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${storm.flash * .5})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// ---------------- COLLECTIBLES + HUD ----------------
 function sfxDolphin() {
   if (!AC) return; const t0 = AC.currentTime;
   for (let i = 0; i < 2; i++) {
@@ -678,6 +809,10 @@ function collectCheck() {
   collectibles = collectibles.filter(w => !w.dead);
 }
 function drawWheels() {
+  if (storm.wind > .05) {
+    ctx.fillStyle = `rgba(210,235,255,${.05 + storm.wind * .06})`;
+    ctx.fillRect(0, H * .5, W, H * .5);
+  }
   for (const w of collectibles) {
     const y = wheelY(w);
     ctx.save(); ctx.translate(w.x, y); ctx.rotate(Math.sin(t * 2 + w.ph) * .15);
@@ -714,6 +849,13 @@ function drawBubbles() {
     ctx.save(); ctx.globalAlpha = Math.max(0, fade); ctx.translate(bx, by); ctx.scale(pop, pop);
     ctx.font = '700 15px "Segoe UI", sans-serif';
     const w = Math.max(60, ctx.measureText(b.text).width + 26);
+    if (storm.wind > .3) { // wind streaks on the bubble
+      ctx.strokeStyle = `rgba(180,210,235,${.35 * storm.wind})`; ctx.lineWidth = 1.2;
+      for (let s = 0; s < 3; s++) {
+        const sy = -30 + s * 11;
+        ctx.beginPath(); ctx.moveTo(-w / 2 - 14, sy); ctx.lineTo(-w / 2 - 30, sy + 3); ctx.stroke();
+      }
+    }
     ctx.fillStyle = 'rgba(255,255,255,.94)'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 2.5;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(-w / 2, -34, w, 34, 10); else ctx.rect(-w / 2, -34, w, 34);
@@ -741,7 +883,12 @@ function drawHUD() {
   const ph = (t / DAY_LEN) % 1, night = nightAmt(ph);
   ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.font = '700 11px "Segoe UI", sans-serif';
   ctx.fillText(night > .55 ? '\u{1F319} NIGHT SWELL' : night > .1 ? '\u{1F306} TWILIGHT' : '\u2600\uFE0F GOLDEN HOUR', W - 22, 138);
-  ctx.shadowBlur = 0; ctx.textAlign = 'left';
+  ctx.textAlign = 'left'; ctx.font = '900 13px "Arial Black", sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,.45)';
+  ctx.fillText((surfedDistance / 100).toFixed(1) + 'km', 20, 100);
+  if (storm.on) { ctx.fillStyle = `rgba(170,200,255,${.5 + .4 * Math.sin(t * 6)})`; ctx.fillText('\u{1F327} STORM SWELL', 20, 122); }
+  else if (shark && !shark.locked) { ctx.fillStyle = 'rgba(255,110,110,.9)'; ctx.fillText('\u{1F988} SOMETHING BELOW', 20, 122); }
+  ctx.shadowBlur = 0;
   if (charging) {
     const c = chargeAmt();
     ctx.strokeStyle = `hsl(${200 - 200 * c},95%,60%)`; ctx.lineWidth = 7; ctx.lineCap = 'round';
@@ -761,6 +908,8 @@ function frame(now) {
   updateFx(dt);
   updateWheels(dt);
   updateWildlife(dt);
+  updateWeather(dt);
+  updateHazards(dt);
   collectCheck();
   if (shake > 0) shake *= .88;
   if (combo > 1 && t - lastScoreAt > 5) combo = 1;
@@ -772,15 +921,18 @@ function frame(now) {
   drawWhale(night);
   drawWaveLayer(t, 22, H * .53, WAVE_SPEED * .65, night > .5 ? 'rgba(8,38,66,.85)' : 'rgba(12,90,120,.85)', night > .5 ? 'rgba(120,215,255,.3)' : 'rgba(190,240,255,.35)');
   drawDolphins();
+  drawShark();
   drawSidekick();
   drawCheeseSurfer(currentAir);
   drawWaterFront(t, night);
   drawWheels();
+  drawGulls();
   drawFx();
   drawBubbles();
   drawHUD();
   ctx.restore();
   drawVignette(night);
+  drawRain();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
